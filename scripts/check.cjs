@@ -1,7 +1,7 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const root=path.resolve(__dirname,'..');
 const source=fs.readFileSync(path.join(root,'chaoxing-pure.user.js'),'utf8');
-assert.equal(/^\/\/ @version\s+1\.0\.0$/m.test(source),true,'userscript release version');
+assert.equal(source.match(/^\/\/ @version\s+(\S+)$/m)?.[1],require('../package.json').version,'userscript release version');
 assert.equal(/const PRIVATE_DEFAULT_API_KEY = '';/.test(source),true,'public default must be empty');
 assert.equal(/\bsk-[A-Za-z0-9_-]{24,}\b/.test(source),false,'possible credential detected');
 assert.equal(/@grant\s+GM_registerMenuCommand/.test(source),true,'local setup menu grant');

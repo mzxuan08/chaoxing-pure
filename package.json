@@ -1,10 +1,14 @@
 {
   "name": "chaoxing-pure",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "纯净版学习通助手用户脚本",
   "scripts": {
     "check": "node --check chaoxing-pure.user.js && node scripts/check.cjs",
-    "test": "node --test tests/script.test.cjs"
+    "test": "node --test tests/script.test.cjs",
+    "test:browser": "node --test tests/image-questions.browser.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
   }
 }

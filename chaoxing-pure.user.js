@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         纯净版
 // @namespace    local:chaoxing-deepseek-pure
-// @version      1.0.0
+// @version      1.0.1
 // @updateURL    https://raw.githubusercontent.com/mzxuan08/chaoxing-pure/main/chaoxing-pure.user.js
 // @downloadURL  https://raw.githubusercontent.com/mzxuan08/chaoxing-pure/main/chaoxing-pure.user.js
 // @description  视频助手与 DeepSeek V4.1 Flash 答题；本地个人配置
@@ -40,7 +40,7 @@
 // ==/UserScript==
 
 /*
- * 本地纯净版 1.0.0，2026-10-08。
+ * 本地纯净版 1.0.1，2026-10-08。
  * 所有答题请求直接发往 DeepSeek 官方 API，使用用户个人账户。
  * 公开版不包含个人 API 凭据；首次使用请通过脚本管理器菜单配置。
  */
@@ -48,7 +48,7 @@
 (() => {
   'use strict';
 
-  const SCRIPT_VERSION = '1.0.0';
+  const SCRIPT_VERSION = '1.0.1';
 
   const CXUtils = {
     safeJSONParse(value, fallback = null) {
@@ -4458,7 +4458,7 @@
             return '';
           }
           const text = node.textContent.trim();
-          if (text) return this._cleanQuestionText(text);
+          if (text) { const cleaned = this._cleanQuestionText(text); if (cleaned) return cleaned; }
         }
       }
       // 备选：取容器内第一段有意义的文本
@@ -4471,7 +4471,7 @@
           return '';
         }
         const text = firstP.textContent.trim();
-        if (text) return this._cleanQuestionText(text);
+        if (text) { const cleaned = this._cleanQuestionText(text); if (cleaned) return cleaned; }
       }
       return '';
     },
@@ -4500,6 +4500,7 @@
                  .replace(/^(单选题|多选题|判断题|填空题|单项选择题|多项选择题)[】\]）)]\s*/, '')
                  // 去掉题目中/末尾的分值角标，如 "（5分）"/"(10.0分)"
                  .replace(/[（(]\s*\d+(\.\d+)?\s*分\s*[)）]/g, '')
+                 .replace(/^[（(]\s*(?:单选题|多选题|判断题|填空题|单项选择题|多项选择题|不定项选择题)(?:[，,][^）)]*)?[）)]\s*/, '')
                  .trim();
     },
 
@@ -4521,6 +4522,159 @@
       }
       return true;
     },
+    _imageSource(image) {
+      return image.currentSrc || image.getAttribute('src') || image.getAttribute('data-src') || image.getAttribute('data-original') || '';
+    },
+    _imageIdentity(image) {
+      // currentSrc may still refer to the previous request just after src is changed.
+      const declared = ['src', 'srcset', 'sizes', 'data-src', 'data-original'].map(name => image.getAttribute(name));
+      return JSON.stringify(declared.some(Boolean) ? declared : [this._imageSource(image)]);
+    },
+    _isQuestionImage(image) {
+      if (!image || !this._isOptionVisible(image) || image.closest('button,script,style,.cx-panel')) return false;
+      if ((image.width > 0 && image.width <= 3) || (image.height > 0 && image.height <= 3)) return false;
+      return /^(?:https?:|data:image\/|blob:)/i.test(this._imageSource(image));
+    },
+    _hasQuestionImages(element) {
+      return Array.from(element?.querySelectorAll('img') || []).some(image => this._isQuestionImage(image));
+    },
+    _imageStemIdentity(element) {
+      const pairs = this._extractOptionPairs(element);
+      const markers = new Map(Array.from(element.querySelectorAll('img')).map((image, index) => [image, `【题图${index}】`]));
+      return this._cleanQuestionText(this._readOCRRegion(element, markers, new Set(pairs.map(pair => pair.element))));
+    },
+    _imageBindingsMatch(bindings, pairs) {
+      return Array.isArray(bindings) && bindings.length === pairs.length && bindings.every((binding, index) => {
+        const pair = pairs[index];
+        return binding.element === pair.element && binding.text === pair.text &&
+          JSON.stringify(binding.sources) === JSON.stringify(Array.from(pair.element.querySelectorAll('img')).filter(image => this._isQuestionImage(image)).map(image => this._imageIdentity(image)));
+      });
+    },
+    _readOCRRegion(node, recognized, excluded = new Set()) {
+      if (!node || excluded.has(node)) return '';
+      if (node.nodeType === 3) return node.nodeValue || '';
+      if (node.nodeType !== 1 || !this._isOptionVisible(node)) return '';
+      if (node.matches('script,style,input,textarea,button,.num_option')) return '';
+      if (node.tagName === 'IMG') return recognized.get(node) || '';
+      return Array.from(node.childNodes).map(child => this._readOCRRegion(child, recognized, excluded)).filter(Boolean).join(' ');
+    },
+    _downloadOCRImage(url, context) {
+      return new Promise(resolve => {
+        if (context.cancelled || typeof GM_xmlhttpRequest !== 'function') { resolve(''); return; }
+        let handle, reader, done = false;
+        const finish = value => { if (done) return; done = true; context.aborters.delete(abort); resolve(value); };
+        const abort = () => { finish(''); try { handle?.abort?.(); reader?.abort?.(); } catch (_) {} };
+        context.aborters.add(abort);
+        try {
+          handle = GM_xmlhttpRequest({ method: 'GET', url, responseType: 'arraybuffer', timeout: 20000,
+            onload: response => {
+              if (done || context.cancelled) { finish(''); return; }
+              if (response.status < 200 || response.status >= 300 || !response.response || response.response.byteLength > 15000000) { finish(''); return; }
+              const mime = String(response.responseHeaders || '').match(/^content-type:\s*([^;\r\n]+)/im)?.[1] || 'image/png';
+              if (!mime.toLowerCase().startsWith('image/')) { finish(''); return; }
+              reader = new FileReader();
+              reader.onload = () => finish(context.cancelled ? '' : String(reader.result || ''));
+              reader.onerror = () => finish(''); reader.onabort = () => finish('');
+              reader.readAsDataURL(new Blob([response.response], { type: mime }));
+            }, onerror: () => finish(''), ontimeout: () => finish(''), onabort: () => finish('')
+          });
+        } catch (_) { finish(''); }
+      });
+    },
+    async _recognizeImageQuestion(element, domResult, run) {
+      if (typeof Tesseract === 'undefined' || typeof Tesseract.createWorker !== 'function') {
+        Logger.log('图片识别引擎尚未加载，本题保留并继续', 'error'); return null;
+      }
+      const images = Array.from(element.querySelectorAll('img')).filter(image => this._isQuestionImage(image));
+      const imageIdentity = image => this._imageIdentity(image);
+      const imageSources = images.map(imageIdentity);
+      const pairs = this._extractOptionPairs(element);
+      if (!images.length || ([this.TYPE_SINGLE, this.TYPE_MULTI, this.TYPE_JUDGE].includes(domResult.type) && !pairs.length)) return null;
+      const bindings = pairs.map(pair => ({ element: pair.element, text: pair.text, sources: Array.from(pair.element.querySelectorAll('img')).filter(image => this._isQuestionImage(image)).map(image => this._imageIdentity(image)) }));
+      const snapshot = { question: this._extractQuestion(element), options: pairs.map(pair => pair.text), imageStem: this._imageStemIdentity(element) };
+      const context = { worker: null, cancelled: false, terminated: false, aborters: new Set() };
+      const active = () => !context.cancelled && (!run || AnswerModule._isRunActive(run));
+      const terminate = () => {
+        if (!context.worker || context.terminated) return;
+        context.terminated = true;
+        try { Promise.resolve(context.worker.terminate()).catch(() => {}); } catch (_) {}
+      };
+      let release, timer;
+      const cancellation = new Promise(resolve => { release = resolve; });
+      const cancel = message => {
+        if (context.cancelled) return;
+        context.cancelled = true;
+        for (const abort of [...context.aborters]) abort();
+        if (typeof message === 'string' && (!run || AnswerModule._isRunActive(run))) Logger.log(message, 'info');
+        terminate(); release(null);
+      };
+      run?.requests.add(cancel);
+      timer = setTimeout(() => cancel('图片识别等待超时，本题保留并继续'), 110000);
+      Logger.log(`正在识别图片题，共 ${images.length} 张图片；首次使用需加载识别数据`, 'info');
+      const execute = async () => {
+        context.worker = await Tesseract.createWorker({ errorHandler: () => cancel('图片识别引擎异常，本题保留并继续') });
+        if (!active()) { terminate(); return null; }
+        await context.worker.load(); if (!active()) return null;
+        await context.worker.loadLanguage('chi_sim+eng'); if (!active()) return null;
+        await context.worker.initialize('chi_sim', 1); if (!active()) return null;
+        await context.worker.setParameters({ preserve_interword_spaces: '1', user_defined_dpi: '150' });
+        const recognized = new Map(), symbolReviews = [];
+        for (let i = 0; i < images.length; i++) {
+          if (!active() || element.isConnected === false) return null;
+          const image = images[i];
+          let input = this._imageSource(image), canvas;
+          // Increase small text/chemical formula resolution without altering page images.
+          if (image.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
+            try {
+              const scale = Math.min(2, 2400 / image.naturalWidth, 1800 / image.naturalHeight);
+              canvas = (element.ownerDocument || document).createElement('canvas');
+              canvas.width = Math.max(1, Math.ceil(image.naturalWidth * scale)) + 24;
+              canvas.height = Math.max(1, Math.ceil(image.naturalHeight * scale)) + 24;
+              const ctx = canvas.getContext('2d'); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+              ctx.drawImage(image, 12, 12, canvas.width - 24, canvas.height - 24);
+              input = canvas.toDataURL('image/png');
+            } catch (_) { input = this._imageSource(image); }
+            finally { if (canvas) { canvas.width = 0; canvas.height = 0; } }
+          }
+          Logger.log(`图片识别 ${i + 1}/${images.length}`, 'info');
+          if (/^https?:/i.test(input)) input = await this._downloadOCRImage(input, context);
+          if (!input || !active()) return null;
+          await context.worker.setParameters({ tessedit_pageseg_mode: image.naturalWidth > 0 && image.naturalHeight / image.naturalWidth < 0.1 ? 7 : 6 });
+          if (!active()) return null;
+          const result = await context.worker.recognize(input);
+          if (!active()) return null;
+          const text = String(result?.data?.text || '').trim();
+          if (!text) { Logger.log(`第 ${i + 1} 张图片未识别到文字，保留本题以避免选项错位`, 'info'); return null; }
+          recognized.set(image, text);
+          if (/\d|[A-Za-z]{2,}|[%％=]/.test(text) || Number(result?.data?.confidence ?? 100) < 75) symbolReviews.push({ image, input, text });
+        }
+        if (symbolReviews.length && active()) {
+          Logger.log('正在复核图片中的数字与化学符号...', 'info');
+          try {
+            await context.worker.initialize('eng+chi_sim', 1);
+            for (const item of symbolReviews) {
+              if (!active()) return null;
+              await context.worker.setParameters({ tessedit_pageseg_mode: item.image.naturalWidth > 0 && item.image.naturalHeight / item.image.naturalWidth < 0.1 ? 7 : 6 });
+              const result = await context.worker.recognize(item.input);
+              if (!active()) return null;
+              const alternative = String(result?.data?.text || '').trim();
+              if (alternative && alternative.replace(/\s/g, '') !== item.text.replace(/\s/g, '')) recognized.set(item.image, item.text + '\n[符号复核] ' + alternative);
+            }
+          } catch (_) { if (!active()) return null; Logger.log('符号复核未完成，保留已有文字识别结果', 'info'); }
+        }
+        const currentImages = Array.from(element.querySelectorAll('img')).filter(image => this._isQuestionImage(image));
+        if (!active() || element.isConnected === false || currentImages.length !== images.length || currentImages.some((image, index) => image !== images[index] || imageIdentity(image) !== imageSources[index]) || snapshot.imageStem !== this._imageStemIdentity(element) || !this._imageBindingsMatch(bindings, this._extractOptionPairs(element))) return null;
+        const question = this._cleanQuestionText(this._readOCRRegion(element, recognized, new Set(pairs.map(pair => pair.element))));
+        const options = pairs.map(pair => this._cleanOptionText(this._readOCRRegion(pair.element, recognized)));
+        if (!question || options.some(option => !option || option === '【图片选项】')) return null;
+        return { question, options, type: domResult.type, imageOptionBindings: bindings, imageDomSnapshot: snapshot };
+      };
+      try {
+        return await Promise.race([execute().catch(() => { if (active()) Logger.log('图片识别失败，本题保留并继续', 'error'); return null; }), cancellation]);
+      } finally {
+        clearTimeout(timer); run?.requests.delete(cancel); context.cancelled = true; for (const abort of [...context.aborters]) abort(); terminate();
+      }
+    },
     _extractOptionPairs(el) {
       if (!el) return [];
       const hasFontSecret = el.querySelector('.font-cxsecret') !== null;
@@ -4537,7 +4691,10 @@
       const seen = new Set();
       const out = [];
       const pushPair = (text, element, input) => {
-        if (!text) return;
+        if (!text) {
+          if (!Array.from(element?.querySelectorAll('img') || []).some(image => this._isQuestionImage(image))) return;
+          text = '【图片选项】';
+        }
         if (!this._isOptionVisible(element)) return;
         if (!input) element = element?.closest('[role="radio"], [role="checkbox"], li, label, .option_li, .option') || element;
         const key = input || element;
@@ -4647,9 +4804,11 @@
     },
 
     // recognize(): 综合识别（先 DOM，失败则字体解密，最后 OCR）
-    async recognize(element) {
+    async recognize(element, run = AnswerModule._activeRun) {
       const domResult = this.readFromDOM(element);
-      if (domResult.question) return domResult;
+      const imageQuestion = this._hasQuestionImages(element);
+      if (imageQuestion && !element.querySelector('.font-cxsecret')) return await this._recognizeImageQuestion(element, domResult, run);
+      if (domResult.question && !imageQuestion) return domResult;
 
       // DOM 提取失败（可能是 font-cxsecret 字体混淆），优先尝试字体解密
       const hasFontSecret = element.querySelector('.font-cxsecret') !== null;
@@ -4663,12 +4822,14 @@
           const decryptedResult = this.readFromDOM(element);
           if (decryptedResult.question) {
             Logger.log('字体解密成功: ' + decryptedResult.question.slice(0, 30) + '...', 'info');
-            return decryptedResult;
+            return imageQuestion ? await this._recognizeImageQuestion(element, decryptedResult, run) : decryptedResult;
           }
         } catch (e) {
           Logger.log('字体解密异常: ' + (e.message || e), 'error');
         }
       }
+
+      if (imageQuestion) return await this._recognizeImageQuestion(element, this.readFromDOM(element), run);
 
       // 字体解密失败，回退到 html2canvas + OCR
       if (typeof html2canvas !== 'undefined' && typeof Tesseract !== 'undefined') {
@@ -5565,6 +5726,7 @@
         type: Solver._detectType(container),
         fillCount: Solver._getFillInputs(container).length,
         question: Solver._extractQuestion(container),
+        imageStem: Solver._hasQuestionImages(container) ? Solver._imageStemIdentity(container) : '',
         options: Solver._extractOptions(container),
         images: Array.from(container?.querySelectorAll('img') || []).map(image => image.getAttribute('src') || '')
       });
@@ -5682,6 +5844,7 @@
         '常规教材知识足以作答时直接依据知识推理，不因未附教材原文或课程名称而拒答；确实依赖缺失的图片、材料或课程特定数据时再标记复核。',
         '无法确定、题目信息不足或选项不完整时，answers 返回空数组，needs_review 返回 true；不要编造。'
       ];
+      if (context.imageOCR) rules.push('题目来自图片 OCR，[符号复核] 后是同一张图片的另一次读取，不是新题目或新选项。交叉核对数字、百分号、上下标与化学符号，不能把乱码当成可靠条件；决定答案的条件仍有歧义时返回 needs_review:true，不要编造。');
       const examples = {
         [Solver.TYPE_SINGLE]: { answers: ['A'], needs_review: false },
         [Solver.TYPE_JUDGE]: { answers: ['对'], needs_review: false },
@@ -6006,13 +6169,14 @@
       const pageOptions = pairs.map(pair => pair.text);
       const options = qData.options?.length ? qData.options : pageOptions;
       if (!pairs.length || options.length !== pairs.length) return false;
+      if (qData.imageOptionBindings && (!Solver._imageBindingsMatch(qData.imageOptionBindings, pairs) || qData.imageDomSnapshot?.imageStem !== Solver._imageStemIdentity(container))) return false;
       let indices;
       if ([Solver.TYPE_SINGLE, Solver.TYPE_MULTI].includes(type)) {
         if (answers.some(v => !/^[A-H]$/.test(v) || v.charCodeAt(0) - 65 >= options.length) ||
             (type === Solver.TYPE_SINGLE && answers.length !== 1)) return false;
         const normalize = value => String(value || '').normalize('NFKC').replace(/\s+/g, '').trim();
         const expected = options.map(normalize), actual = pageOptions.map(normalize);
-        if (expected.join('\u0000') === actual.join('\u0000')) indices = answers.map(v => v.charCodeAt(0) - 65);
+        if (qData.imageOptionBindings || expected.join('\u0000') === actual.join('\u0000')) indices = answers.map(v => v.charCodeAt(0) - 65);
         else {
           const mapping = [];
           for (const text of expected) {
@@ -6027,7 +6191,7 @@
         if (answers.length !== 1) return false;
         const wanted = answers[0] === '对' ? Solver._isTrue.bind(Solver) : answers[0] === '错' ? Solver._isFalse.bind(Solver) : null;
         if (!wanted) return false;
-        indices = pageOptions.map((value, i) => wanted(value) ? i : -1).filter(i => i >= 0);
+        indices = (qData.imageOptionBindings ? options : pageOptions).map((value, i) => wanted(value) ? i : -1).filter(i => i >= 0);
         if (indices.length !== 1) return false;
       } else return false;
       if (!indices.length || !this._isRunActive(run)) return false;
@@ -6046,7 +6210,7 @@
       try {
         const before = this._questionFingerprint(container);
         const wasSecret = !!container.querySelector('.font-cxsecret');
-        const qData = await this._withDeadline(Solver.recognize(container), 15000, run);
+        const qData = await this._withDeadline(Solver.recognize(container, run), Solver._hasQuestionImages(container) ? 120000 : 15000, run);
         if (!this._isRunActive(run)) return false;
         if (!qData?.question) { Logger.log(`${label} 识别失败，保留本题并继续`, 'info'); return false; }
         const fingerprint = this._questionFingerprint(container);
@@ -6059,11 +6223,11 @@
           const decoded = wasSecret && !container.querySelector('.font-cxsecret') &&
             oldPage.id === newPage.id && oldPage.fillCount === newPage.fillCount && qData.type === newPage.type &&
             JSON.stringify(oldPage.images) === JSON.stringify(newPage.images) &&
-            normalize(qData.question) === normalize(newPage.question) &&
-            JSON.stringify((qData.options || []).map(normalize)) === JSON.stringify(newPage.options.map(normalize));
+            normalize(qData.imageDomSnapshot?.question ?? qData.question) === normalize(newPage.question) &&
+            JSON.stringify((qData.imageDomSnapshot?.options || qData.options || []).map(normalize)) === JSON.stringify(newPage.options.map(normalize));
           if (!decoded) { Logger.log(`${label} 识别期间题目已变化，丢弃旧识别结果`, 'info'); return false; }
         }
-        const result = await this._queryAnswer(qData.question, qData.options, qData.type, run, { fillCount: qData.type === Solver.TYPE_FILL ? Solver._getFillInputs(container).length : 0 });
+        const result = await this._queryAnswer(qData.question, qData.options, qData.type, run, { imageOCR: !!qData.imageOptionBindings, fillCount: qData.type === Solver.TYPE_FILL ? Solver._getFillInputs(container).length : 0 });
         if (!this._isRunActive(run)) return false;
         if (container.isConnected === false || fingerprint !== this._questionFingerprint(container)) { Logger.log(`${label} 页面题目已变化，丢弃旧答案`, 'info'); return false; }
         const ok = await this._applyAnswer(qData, container, label, result, run);
@@ -6308,7 +6472,7 @@
       const videoCfg = ConfigStore.getVideoConfig();
       const answerCfg = ConfigStore.getAnswerConfig();
 
-      Logger.log('纯净版 v1.0.0 已加载', 'success');
+      Logger.log('纯净版 v1.0.1 已加载', 'success');
 
       // 4. 注入 UI 面板
       UIPanel.init();
