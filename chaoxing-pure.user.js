@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         纯净版
 // @namespace    local:chaoxing-deepseek-pure
-// @version      1.0.1
+// @version      1.0.2
 // @updateURL    https://raw.githubusercontent.com/mzxuan08/chaoxing-pure/main/chaoxing-pure.user.js
 // @downloadURL  https://raw.githubusercontent.com/mzxuan08/chaoxing-pure/main/chaoxing-pure.user.js
 // @description  视频助手与 DeepSeek V4.1 Flash 答题；本地个人配置
@@ -40,7 +40,7 @@
 // ==/UserScript==
 
 /*
- * 本地纯净版 1.0.1，2026-10-08。
+ * 本地纯净版 1.0.2，2026-10-08。
  * 所有答题请求直接发往 DeepSeek 官方 API，使用用户个人账户。
  * 公开版不包含个人 API 凭据；首次使用请通过脚本管理器菜单配置。
  */
@@ -48,7 +48,7 @@
 (() => {
   'use strict';
 
-  const SCRIPT_VERSION = '1.0.1';
+  const SCRIPT_VERSION = '1.0.2';
 
   const CXUtils = {
     safeJSONParse(value, fallback = null) {
@@ -4462,8 +4462,8 @@
         }
       }
       // 备选：取容器内第一段有意义的文本
-      const firstP = el.querySelector('p, h3, h4, .title');
-      if (firstP) {
+      for (const firstP of el.querySelectorAll('p, h3, h4, .title')) {
+        if (firstP.closest('.stem_answer, .Answer, .edui-editor, [contenteditable]')) continue;
         // 同样检测字体混淆
         if (firstP.classList?.contains('font-cxsecret') || firstP.closest?.('.font-cxsecret')) {
           const ariaLabel = firstP.getAttribute('aria-label');
@@ -5296,31 +5296,85 @@
       Logger.log(`已选择选项: ${summary}${skipNote}`, 'info');
     },
 
+    _readFillValue(input) {
+      if (!input) return '';
+      if (input.tagName === 'IFRAME') return '';
+      return String(['INPUT', 'TEXTAREA'].includes(input.tagName) ? input.value || '' : input.innerText ?? input.textContent ?? '').replace(/\u200b/g, '').trim();
+    },
+    _fillEditorFrame(input) {
+      try { return input.tagName === 'BODY' ? input.ownerDocument.defaultView.frameElement : null; } catch (_) { return null; }
+    },
+    _fillBackingField(input) {
+      const host = this._fillEditorFrame(input) || input;
+      return (host?.closest('.textDIV, .divText') || host?.closest('.edui-editor'))?.querySelector('textarea') || null;
+    },
+    _fillEditorInstance(input) {
+      const frame = this._fillEditorFrame(input), doc = input.ownerDocument;
+      const hostWindow = frame?.ownerDocument?.defaultView || doc?.defaultView || window;
+      try {
+        const registry = (typeof unsafeWindow !== 'undefined' ? unsafeWindow.UE : null) || hostWindow.UE;
+        const backing = this._fillBackingField(input);
+        return Object.values(registry?.instants || {}).find(editor => editor &&
+          (editor.document === doc || editor.body === input || (backing?.id && editor.key === backing.id))) || null;
+      } catch (_) { return null; }
+    },
+    _fillEditable(input) {
+      if (!input || input.isConnected === false || input.tagName === 'IFRAME' || input.disabled || input.readOnly) return false;
+      if (['INPUT', 'TEXTAREA'].includes(input.tagName)) return this._isOptionVisible(input);
+      const frame = this._fillEditorFrame(input);
+      return input.isContentEditable && input.getAttribute('aria-readonly') !== 'true' &&
+        (!frame || (frame.isConnected && this._isOptionVisible(frame)));
+    },
+    _writeFillValue(input, value) {
+      if (['INPUT', 'TEXTAREA'].includes(input.tagName)) {
+        const win = input.ownerDocument.defaultView;
+        const prototype = input.tagName === 'INPUT' ? win.HTMLInputElement.prototype : win.HTMLTextAreaElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+        if (setter) setter.call(input, value); else input.value = value;
+      } else {
+        const editor = this._fillEditorInstance(input);
+        if (editor && typeof editor.setContent === 'function') {
+          const escape = input.ownerDocument.createElement('div'); escape.textContent = value;
+          editor.setContent(escape.innerHTML.replace(/\n/g, '<br>'));
+          editor.fireEvent?.('contentchange'); editor.sync?.();
+        } else input.textContent = value;
+        const backing = this._fillBackingField(input);
+        if (backing) backing.value = input.innerHTML;
+      }
+      const win = input.ownerDocument.defaultView;
+      for (const name of ['input', 'change']) input.dispatchEvent(new win.Event(name, { bubbles: true }));
+      const backing = this._fillBackingField(input);
+      if (backing && backing !== input) for (const name of ['input', 'change']) backing.dispatchEvent(new backing.ownerDocument.defaultView.Event(name, { bubbles: true }));
+    },
     _getFillInputs(container) {
-      return Array.from(container?.querySelectorAll('input, textarea') || []).filter(input => {
-        if (input.tagName !== 'TEXTAREA' && input.type !== 'text') return false;
-        if (input.disabled || !this._isOptionVisible(input)) return false;
-        try {
-          const style = (input.ownerDocument?.defaultView || window).getComputedStyle(input);
-          return style.display !== 'none' && style.visibility !== 'hidden';
-        } catch (_) { return true; }
-      });
+      const fields = [], seen = new Set();
+      for (const node of Array.from(container?.querySelectorAll('input, textarea, [contenteditable], iframe') || [])) {
+        let input = node;
+        if (node.tagName === 'IFRAME') {
+          if (!node.closest('.edui-editor, .textDIV, .divText') || !this._isOptionVisible(node)) continue;
+          try { input = node.contentDocument?.body || node; } catch (_) { input = node; }
+        } else if (['INPUT', 'TEXTAREA'].includes(node.tagName)) {
+          if ((node.tagName !== 'TEXTAREA' && node.type !== 'text') || node.disabled || !this._isOptionVisible(node)) continue;
+          // A UEditor textarea stores the same blank as its visible iframe.
+          if (node.closest('.textDIV, .divText')?.querySelector('.edui-editor iframe')) continue;
+        } else {
+          if (node.getAttribute('contenteditable') === 'false' || !this._isOptionVisible(node) || node.parentElement?.closest('[contenteditable="true"]')) continue;
+        }
+        if (!seen.has(input)) { seen.add(input); fields.push(input); }
+      }
+      return fields;
     },
     _fillBlanks(answers, container) {
       const inputs = this._getFillInputs(container);
       const values = Array.isArray(answers) ? answers.map(v => String(v ?? '').trim()) : [];
-      if (!inputs.length || values.length !== inputs.length || values.some(v => !v) || inputs.some(input => input.readOnly)) {
-        Logger.log('填空数量不匹配、答案为空或输入框不可编辑，未填写本题', 'error');
-        return false;
+      if (!inputs.length || values.length !== inputs.length || values.some(v => !v) || inputs.some(input => !this._fillEditable(input))) {
+        Logger.log('填空数量不匹配、答案为空或编辑器未就绪，保留本题并继续', 'info'); return false;
       }
-      inputs.forEach((input, i) => { input.value = values[i]; });
-      inputs.forEach(input => {
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-      });
+      try { inputs.forEach((input, i) => this._writeFillValue(input, values[i])); }
+      catch (_) { Logger.log('填空编辑器未能写入内容，保留本题并继续', 'info'); return false; }
       const current = this._getFillInputs(container);
-      const complete = current.length === values.length && current.every((input, i) => input.value.trim() === values[i]);
-      if (!complete) Logger.log('填空内容未完整保留，请人工检查', 'error');
+      const complete = current.length === inputs.length && current.every((input, i) => input === inputs[i] && this._readFillValue(input) === values[i]);
+      if (!complete) Logger.log('填空内容未完整保留，请人工检查', 'info');
       return complete;
     },
 
@@ -6209,6 +6263,7 @@
       if (Solver._detectType(container) !== Solver.TYPE_MULTI && this._isQuestionCompleted(container)) return true;
       try {
         const before = this._questionFingerprint(container);
+        const fillFields = Solver._getFillInputs(container);
         const wasSecret = !!container.querySelector('.font-cxsecret');
         const qData = await this._withDeadline(Solver.recognize(container, run), Solver._hasQuestionImages(container) ? 120000 : 15000, run);
         if (!this._isRunActive(run)) return false;
@@ -6230,6 +6285,12 @@
         const result = await this._queryAnswer(qData.question, qData.options, qData.type, run, { imageOCR: !!qData.imageOptionBindings, fillCount: qData.type === Solver.TYPE_FILL ? Solver._getFillInputs(container).length : 0 });
         if (!this._isRunActive(run)) return false;
         if (container.isConnected === false || fingerprint !== this._questionFingerprint(container)) { Logger.log(`${label} 页面题目已变化，丢弃旧答案`, 'info'); return false; }
+        if (qData.type === Solver.TYPE_FILL) {
+          const fields = Solver._getFillInputs(container);
+          if (fields.length !== fillFields.length || fields.some((field, i) => field !== fillFields[i])) {
+            Logger.log(`${label} 填空编辑器已变化，丢弃旧答案`, 'info'); return false;
+          }
+        }
         const ok = await this._applyAnswer(qData, container, label, result, run);
         if (ok) Logger.log(`${label} 已填写`, 'success');
         return ok;
@@ -6265,7 +6326,7 @@
     _isQuestionCompleted(container) {
       if (!container) return false;
       const inputs = Solver._getFillInputs(container);
-      if (inputs.length) return inputs.every(input => String(input.value || '').trim().length > 0);
+      if (inputs.length) return inputs.every(input => Solver._readFillValue(input).length > 0);
       const pairs = Solver._extractOptionPairs(container);
       return pairs.length > 0 && pairs.some(pair => Solver._isPairSelected(pair));
     },
@@ -6472,7 +6533,7 @@
       const videoCfg = ConfigStore.getVideoConfig();
       const answerCfg = ConfigStore.getAnswerConfig();
 
-      Logger.log('纯净版 v1.0.1 已加载', 'success');
+      Logger.log('纯净版 v1.0.2 已加载', 'success');
 
       // 4. 注入 UI 面板
       UIPanel.init();
