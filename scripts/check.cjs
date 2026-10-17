@@ -1,0 +1,11 @@
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+const root=path.resolve(__dirname,'..');
+const source=fs.readFileSync(path.join(root,'chaoxing-pure.user.js'),'utf8');
+assert.equal(/^\/\/ @version\s+1\.0\.0$/m.test(source),true,'userscript release version');
+assert.equal(/const PRIVATE_DEFAULT_API_KEY = '';/.test(source),true,'public default must be empty');
+assert.equal(/\bsk-[A-Za-z0-9_-]{24,}\b/.test(source),false,'possible credential detected');
+assert.equal(/@grant\s+GM_registerMenuCommand/.test(source),true,'local setup menu grant');
+assert.equal(source.trimEnd().endsWith('})();'),true,'complete script required');
+for(const domain of ['chaoxing.com','xuexitong.com','api.deepseek.com','chizhu-dl.github.io'])assert.ok(source.includes('// @connect      '+domain),'missing request permission');
+assert.equal(source.split('\n').length>6000,true,'unexpectedly truncated source');
+console.log('Public release checks passed: version, empty default, local configuration, connection permissions and complete source.');
