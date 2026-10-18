@@ -72,13 +72,40 @@ test('public release has no embedded key and never exposes locally configured ke
   assert.ok(key.length > 20);
   assert.equal(UIPanel._buildHTML().includes(key), false);
 });
-test('question interval varies between 2 and 2.5 seconds without unlock dependency', async () => {
+test('question interval varies between 0.2 and 0.4 seconds without unlock dependency', async () => {
   const { AnswerModule, requests } = setup();
   AnswerModule._mode = 'ai';
   const delays = await Promise.all(Array.from({ length: 20 }, () => AnswerModule._getQuestionDelay()));
-  assert.ok(delays.every(delay => delay >= 2000 && delay <= 2500));
+  assert.ok(delays.every(delay => delay >= 200 && delay <= 400));
   assert.ok(new Set(delays).size > 1, 'interval is randomized');
   assert.equal(requests.length, 0);
+});
+
+function transitionFixture(config={},remote=false,nextVideo=null){
+  const env=setup();const {VideoModule:video,FrameMediaBridge:bridge,ConfigStore,ctx}=env;
+  ConfigStore.getVideoConfig=()=>({autoAdvance:true,autoAnswerQuiz:true,...config});
+  video._playing=true;video._playbackEpoch=1;video._getVideoSourceKey=()=> 'test-video';video._findVideoElement=()=>nextVideo;
+  bridge.playNextWorker=()=>false;const timers=[],actions=[];
+  ctx.setTimeout=(fn,ms)=>{const t={fn,ms};timers.push(t);return t;};ctx.clearTimeout=()=>{};
+  video._checkAndHandleChapterQuiz=()=>actions.push('quiz');video.advanceToNextChapter=()=>actions.push('next');video._tryPlayVideo=()=>actions.push('play');
+  let ended;const element={dataset:{},addEventListener:(name,fn)=>{if(name==='ended')ended=fn;}};
+  const finish=()=>{if(remote)video._handleRemoteVideoEnded();else{video._bindVideoEvents(element);ended();}};
+  return{...env,timers,actions,finish,element};
+}
+for(const remote of [false,true])for(const quiz of [false,true])test(`fast transition: remote=${remote} quiz=${quiz} checks next content after 200ms`,()=>{
+  const {timers,actions,finish}=transitionFixture({autoAnswerQuiz:quiz},remote);finish();assert.equal(timers.length,1);assert.equal(timers[0].ms,200);timers.shift().fn();assert.deepEqual(actions,[quiz?'quiz':'next']);
+});
+test('fast transition: another local video scrolls and starts within 300ms of fixed waits',()=>{
+  let scrolled=false;const next={scrollIntoView:()=>{scrolled=true;}};const {timers,actions,finish}=transitionFixture({},false,next);finish();assert.equal(timers[0].ms,100);timers.shift().fn();assert.equal(scrolled,true);assert.equal(timers[0].ms,200);timers.shift().fn();assert.deepEqual(actions,['play']);
+});
+for(const remote of [false,true])test(`fast transition: stopped playback never advances remote=${remote}`,()=>{
+  const {VideoModule,timers,actions,finish}=transitionFixture({},remote);finish();VideoModule._playing=false;VideoModule._playbackEpoch++;timers.shift().fn();assert.deepEqual(actions,[]);
+});
+test('fast transition: disabled automatic advance schedules nothing',()=>{
+  const {timers,actions,finish}=transitionFixture({autoAdvance:false});finish();assert.equal(timers.length,0);assert.deepEqual(actions,[]);
+});
+test('fast transition: ready cross-frame worker starts without an added chapter delay',()=>{
+  const {FrameMediaBridge,timers,finish}=transitionFixture({},true);let starts=0;FrameMediaBridge.playNextWorker=()=>{starts++;return true;};finish();assert.equal(starts,1);assert.equal(timers.length,0);
 });
 test('answers go directly to official DeepSeek Flash API', async () => {
   const { AnswerModule, Solver, requests, messages } = setup({ cx_answer_config: { aiProvider: 'deepseek', aiApiKey: 'test-only-key' } });

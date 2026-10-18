@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         纯净版
 // @namespace    local:chaoxing-deepseek-pure
-// @version      1.0.2
+// @version      1.0.3
 // @updateURL    https://raw.githubusercontent.com/mzxuan08/chaoxing-pure/main/chaoxing-pure.user.js
 // @downloadURL  https://raw.githubusercontent.com/mzxuan08/chaoxing-pure/main/chaoxing-pure.user.js
 // @description  视频助手与 DeepSeek V4.1 Flash 答题；本地个人配置
@@ -40,7 +40,7 @@
 // ==/UserScript==
 
 /*
- * 本地纯净版 1.0.2，2026-10-08。
+ * 本地纯净版 1.0.3，2026-10-08。
  * 所有答题请求直接发往 DeepSeek 官方 API，使用用户个人账户。
  * 公开版不包含个人 API 凭据；首次使用请通过脚本管理器菜单配置。
  */
@@ -48,7 +48,7 @@
 (() => {
   'use strict';
 
-  const SCRIPT_VERSION = '1.0.2';
+  const SCRIPT_VERSION = '1.0.3';
 
   const CXUtils = {
     safeJSONParse(value, fallback = null) {
@@ -3010,9 +3010,9 @@
             if (!this._playing) return;
             // 滚动到下一个视频，让 lazy-loaded 的播放器初始化
             try { nextVideo.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
-            // 等 1.5s 让 scroll + 任务点上报完成
-            this._setPlaybackTimeout(() => this._tryPlayVideo(), 1500);
-          }, 1500);
+            // 短暂等待滚动后尝试播放；源未就绪由既有重试流程处理
+            this._setPlaybackTimeout(() => this._tryPlayVideo(), 200);
+          }, 100);
           return;
         }
 
@@ -3025,9 +3025,9 @@
         // 当前课时所有视频均已播完 → 检查测验或推进下一章
         const autoAnswer = cfg.autoAnswerQuiz !== false;
         if (autoAnswer) {
-          this._setPlaybackTimeout(() => this._checkAndHandleChapterQuiz(), 1500);
+          this._setPlaybackTimeout(() => this._checkAndHandleChapterQuiz(), 200);
         } else {
-          this._setPlaybackTimeout(() => this.advanceToNextChapter(), 1500);
+          this._setPlaybackTimeout(() => this.advanceToNextChapter(), 200);
         }
       };
       video.addEventListener('ended', onEnded);
@@ -3048,9 +3048,9 @@
         return;
       }
       if (cfg.autoAnswerQuiz !== false) {
-        this._setPlaybackTimeout(() => this._checkAndHandleChapterQuiz(), 1500);
+        this._setPlaybackTimeout(() => this._checkAndHandleChapterQuiz(), 200);
       } else {
-        this._setPlaybackTimeout(() => this.advanceToNextChapter(), 1500);
+        this._setPlaybackTimeout(() => this.advanceToNextChapter(), 200);
       }
     },
 
@@ -5696,8 +5696,8 @@
       });
     },
 
-    // 每题结束后随机等待 2–2.5 秒。
-    async _getQuestionDelay() { return 2000 + Math.random() * 500; },
+    // AI 返回并填写完成后，只额外等待 0.2–0.4 秒。
+    async _getQuestionDelay() { return 200 + Math.random() * 200; },
 
     // ---- 模式管理 ----
 
@@ -6533,7 +6533,7 @@
       const videoCfg = ConfigStore.getVideoConfig();
       const answerCfg = ConfigStore.getAnswerConfig();
 
-      Logger.log('纯净版 v1.0.2 已加载', 'success');
+      Logger.log('纯净版 v1.0.3 已加载', 'success');
 
       // 4. 注入 UI 面板
       UIPanel.init();
