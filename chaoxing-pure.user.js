@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         纯净版
 // @namespace    local:chaoxing-deepseek-pure
-// @version      1.0.3
+// @version      1.0.4
 // @updateURL    https://raw.githubusercontent.com/mzxuan08/chaoxing-pure/main/chaoxing-pure.user.js
 // @downloadURL  https://raw.githubusercontent.com/mzxuan08/chaoxing-pure/main/chaoxing-pure.user.js
 // @description  视频助手与 DeepSeek V4.1 Flash 答题；本地个人配置
@@ -40,7 +40,7 @@
 // ==/UserScript==
 
 /*
- * 本地纯净版 1.0.3，2026-10-08。
+ * 本地纯净版 1.0.4，2026-10-08。
  * 所有答题请求直接发往 DeepSeek 官方 API，使用用户个人账户。
  * 公开版不包含个人 API 凭据；首次使用请通过脚本管理器菜单配置。
  */
@@ -48,7 +48,7 @@
 (() => {
   'use strict';
 
-  const SCRIPT_VERSION = '1.0.3';
+  const SCRIPT_VERSION = '1.0.4';
 
   const CXUtils = {
     safeJSONParse(value, fallback = null) {
@@ -2789,11 +2789,11 @@
       if (this._playing) this._scheduleDocumentRecheck(15000);
       return false;
     },
-    async _trySubmitQuiz(doc, label, run) {
+    async _trySubmitQuiz(doc, label, run, scope = null) {
       const guard = () => AnswerModule._isRunActive(run);
       for (let attempt = 0; attempt < 2 && guard(); attempt++) {
         try {
-          if (await Solver._clickFinalSubmit(doc, label, guard)) return true;
+          if (await Solver._clickFinalSubmit(doc, label, guard, scope ? { scope } : {})) return true;
         } catch (_) { Logger.log(`${label}提交暂不可用，准备继续处理`, 'info'); }
         if (attempt === 0 && !(await AnswerModule._delay(1200, run))) return false;
       }
@@ -3705,6 +3705,54 @@
       return true;
     },
 
+    _isVideoQuizContent(root) {
+      if (!root || (root.nodeType === 1 && !Solver._isVisibleElement(root))) return false;
+      const selector = '.questionLi, .singleQuesId, .multipleQuesId, .judgementQuesId, .completionQuesId, .TiMu, .mark_table';
+      const questions = Array.from(root.querySelectorAll(selector));
+      if (root.matches?.(selector)) questions.unshift(root);
+      const usable = node => Solver._isVisibleElement(node) &&
+        (Solver._extractOptionPairs(node).length > 0 || Solver._getFillInputs(node).length > 0);
+      if (questions.some(usable)) return true;
+      const dedicated = root.matches?.('.ans-videoquiz, [id^="videoquiz"], .videoquiz, .video-quiz, .mvp-question, .topicWrap');
+      const typed = /单选题|多选题|判断题|填空题/.test(root.innerText || root.textContent || '');
+      return !!((dedicated || typed) && usable(root));
+    },
+    _recoverVideoPopup(reason) {
+      const video = this._videoEl || this._findVideoElement();
+      const worker = FrameMediaBridge._workers.get(FrameMediaBridge._activeWorkerId);
+      const remote = worker?.playToken && worker.chapterEpoch === FrameMediaBridge._chapterEpoch && FrameMediaBridge._isWorkerUsable(worker);
+      if ((video && !video.ended && video.dataset?.cxFinished !== '1') || remote) {
+        this._lastQuizCloseTime = Date.now();
+        Logger.log(`${reason}，当前视频尚未完成，保留本节并等待重查`, 'info');
+        return false;
+      }
+      return this._recoverCourse(reason);
+    },
+    async _waitVideoPopupControl(scope, run, submitted, clicked) {
+      if (submitted && !(await AnswerModule._delay(300, run))) return null;
+      for (let attempt = 0; attempt < 7 && AnswerModule._isRunActive(run); attempt++) {
+        if (scope.isConnected === false) return null;
+        const button = Solver._findExactQuizButton(scope.ownerDocument || scope, ['确定', '确认', '继续提交', '提交', '完成', '继续播放', '继续学习', '关闭'], scope, clicked);
+        if (button) return button;
+        if (!submitted || attempt === 6 || !(await AnswerModule._delay(150, run))) return null;
+      }
+      return null;
+    },
+    async _handleVideoPopupControls(scope, run, submitted, previous, previousText) {
+      const clicked = new Map();
+      if (submitted && previous) clicked.set(previous, previousText);
+      let acted = false;
+      for (let step = 0; step < 3 && AnswerModule._isRunActive(run); step++) {
+        const button = await this._waitVideoPopupControl(scope, run, submitted, clicked);
+        if (!button || !AnswerModule._isRunActive(run) || button.isConnected === false) break;
+        const text = Solver._quizControlText(button);
+        clicked.set(button, text);
+        button.click(); acted = true;
+        if (/^(?:继续播放|继续学习|关闭)$/.test(text)) break;
+        if (!(await AnswerModule._delay(150, run))) break;
+      }
+      return acted;
+    },
     _findVideoPopupQuizDoc() {
       const docs = CXUtils.listAccessibleDocs(document, 4);
       const popupSelectors = [
@@ -3726,9 +3774,7 @@
           try { nodes = Array.from(doc.querySelectorAll(sel)); } catch (_) {}
           for (const node of nodes) {
             if (!Solver._isVisibleElement(node)) continue;
-            const hasQuestion = node.querySelector(questionSelectors) ||
-              node.querySelector('input[type="radio"], input[type="checkbox"], textarea, input[type="text"]') ||
-              /单选|多选|判断|填空|题目|提交|确定|继续/i.test(node.innerText || node.textContent || '');
+            const hasQuestion = this._isVideoQuizContent(node);
             if (hasQuestion) return { doc, root: node };
           }
         }
@@ -3748,7 +3794,7 @@
       const epoch = this._playbackEpoch;
       if (!this._playing || this._quizAnswering || ConfigStore.getVideoConfig().autoAnswerQuiz === false) return false;
       const found = this._findVideoPopupQuizDoc();
-      if (!found) return false;
+      if (!found || !this._isVideoQuizContent(found.root || found.doc)) return false;
       const run = AnswerModule._beginRun('video');
       if (!run) return true;
       this._quizAnswering = true;
@@ -3764,25 +3810,27 @@
           if (!AnswerModule._isRunActive(run)) return true;
           run.processed++;
           if (!ok) run.failed++;
-          else await Solver._clickSubmit(targets[i], () => AnswerModule._isRunActive(run));
+          else await Solver._clickSubmit(targets[i], () => AnswerModule._isRunActive(run), { scope });
           if (i < targets.length - 1) await AnswerModule._delay(await AnswerModule._getQuestionDelay(), run);
         }
         run.complete = targets.every(el => el.isConnected !== false && AnswerModule._isQuestionCompleted(el));
         const guard = () => AnswerModule._isRunActive(run);
         if (!guard()) return true;
         if (!AnswerModule._canSubmitRun(run)) Logger.log('视频弹题存在未完成题目，保留内容并尝试继续', 'info');
-        const submitted = await this._trySubmitQuiz(found.doc, '视频弹题', run);
+        const previousSubmit = Solver._findExactQuizButton(found.doc, Solver._popupSubmitLabels, scope);
+        const previousText = Solver._quizControlText(previousSubmit);
+        const submitted = await this._trySubmitQuiz(found.doc, '视频弹题', run, scope);
         if (!guard()) return true;
-        const continueBtn = Solver._findClickableByText(found.doc, ['继续播放', '继续学习', '确定', '关闭', '完成', '提交'], scope);
-        if (continueBtn && guard()) continueBtn.click();
-        if (!submitted && !continueBtn) { this._recoverCourse('视频弹题未找到可用按钮'); return true; }
+        const continueBtn = await this._handleVideoPopupControls(scope, run, submitted, previousSubmit, previousText);
+
+        if (!submitted && !continueBtn) { this._recoverVideoPopup('视频弹题未找到可用按钮'); return true; }
         this._lastQuizCloseTime = Date.now();
         if (await AnswerModule._delay(800, run)) {
           const video = this._videoEl || this._findVideoElement();
           if (video && video.paused && !video.ended && this._isVideoSourceReady(video)) await this._playVideoWithDeadline(video).catch(() => {});
         }
         return true;
-      } catch (_) { if (AnswerModule._isRunActive(run)) this._recoverCourse('视频弹题处理异常'); return true; }
+      } catch (_) { if (AnswerModule._isRunActive(run)) this._recoverVideoPopup('视频弹题处理异常'); return true; }
       finally { AnswerModule._mode = prevMode; if (epoch === this._playbackEpoch) this._quizAnswering = false; AnswerModule._finishRun(run); }
     },
 
@@ -5459,7 +5507,28 @@
       return false;
     },
 
-    async _clickSubmit(container, canAct = () => true) {
+    _quizControlText(button) {
+      return String(button?.innerText || button?.textContent || button?.value || button?.getAttribute?.('aria-label') || '').replace(/\s+/g, '');
+    },
+    _isQuestionSubmitControl(button) {
+      if (!this._isVisibleElement(button)) return false;
+      const label = this._quizControlText(button);
+      if (/下一节|上一节|下一章|上一章|返回课程|去学习|去完成/.test(label) || button.closest?.('.prev_next, #coursetree')) return false;
+      return /^(?:提交|保存|暂存|暂时保存|确定|确认|完成|交卷)(?:本题|答案|作业|试卷|测验|考试|作答|并提交)?$/.test(label) ||
+        (!label && (button.type === 'submit' || /submit|save/i.test(button.id || '')));
+    },
+    _popupSubmitLabels: ['提交作业', '提交测验', '提交考试', '提交试卷', '提交答案', '提交', '保存并提交', '保存提交', '完成', '确定', '确认', '交卷'],
+    _findExactQuizButton(doc, labels, root, excluded = null) {
+      if (!root || root.isConnected === false) return null;
+      const wanted = new Set(labels.map(label => String(label).replace(/\s+/g, '')));
+      const nodes = root.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"], .jb_btn, .btn, .Btn, .submit_btn, .save_btn');
+      for (const label of wanted) {
+        const match = Array.from(nodes).find(button => button !== excluded && excluded?.get?.(button) !== label && this._isVisibleElement(button) && this._quizControlText(button) === label);
+        if (match) return match;
+      }
+      return null;
+    },
+    async _clickSubmit(container, canAct = () => true, options = {}) {
       if (!canAct()) return false;
       if (!container || typeof container.querySelector !== 'function') return false;
       const doc = container.ownerDocument || document;
@@ -5488,7 +5557,7 @@
       let submitBtn = null;
       for (const sel of submitSelectors) {
         try {
-          submitBtn = container?.querySelector(sel);
+          submitBtn = Array.from(container.querySelectorAll(sel)).find(button => this._isQuestionSubmitControl(button)) || null;
         } catch (_) {
           submitBtn = null;
         }
@@ -5502,12 +5571,13 @@
           container
         );
       }
+      if (submitBtn && !this._isQuestionSubmitControl(submitBtn)) submitBtn = null;
       if (submitBtn) {
         await new Promise(r => setTimeout(r, 300));
         if (!canAct()) return false;
         try { submitBtn.click(); } catch (_) { return false; }
         Logger.log('已点击提交/保存按钮', 'info');
-        await this._confirmSubmitDialogs(doc, canAct);
+        if (!options.scope) await this._confirmSubmitDialogs(doc, canAct);
         return true;
       }
       return false;
@@ -5615,7 +5685,7 @@
     async _clickFinalSubmit(doc, label = '任务', canAct = () => true, options = {}) {
       if (!canAct()) return false;
       doc = doc || document;
-      const btn = options.chapter ? this._findChapterSubmitButton(doc) : this._findClickableByText(doc, [
+      const btn = options.scope ? this._findExactQuizButton(doc, this._popupSubmitLabels, options.scope) : options.chapter ? this._findChapterSubmitButton(doc) : this._findClickableByText(doc, [
         '提交作业', '提交测验', '提交考试', '提交试卷', '提交答案', '提交',
         '保存并提交', '保存提交', '完成', '交卷'
       ]) || this._findClickableByText(document, [
@@ -5631,7 +5701,7 @@
       if (!canAct() || btn.isConnected === false) return false;
       try { btn.click(); } catch (_) { return false; }
       Logger.log(`${label}已点击最终提交按钮`, 'success');
-      if (!options.chapter) await this._confirmSubmitDialogs(doc, canAct);
+      if (!options.chapter && !options.scope) await this._confirmSubmitDialogs(doc, canAct);
       return true;
     }
   };
@@ -6533,7 +6603,7 @@
       const videoCfg = ConfigStore.getVideoConfig();
       const answerCfg = ConfigStore.getAnswerConfig();
 
-      Logger.log('纯净版 v1.0.3 已加载', 'success');
+      Logger.log('纯净版 v1.0.4 已加载', 'success');
 
       // 4. 注入 UI 面板
       UIPanel.init();
