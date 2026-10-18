@@ -286,13 +286,14 @@ test('chapter quiz availability checks the local key only', async () => {
   assert.equal(await VideoModule._canUseQuizMode('ai', 'test'), true);
   assert.equal(requests.length, 0);
 });
-test('UI exposes only the pure edition name and no AI configuration controls', () => {
+test('UI exposes CX study assistant name and no AI configuration controls', () => {
   const { UIPanel } = setup();
   const html = UIPanel._buildHTML();
   assert.equal(/cx-ai-apikey|cx-btn-save-aikey|cx-ai-provider-info|cx-video-quiz-mode-inline|cx-cfg-quiz-mode|DeepSeek/.test(html), false);
-  assert.ok(html.includes('纯净版'));
+  assert.ok(html.includes('CX学习助手'));
+  assert.equal(html.includes('纯净版'), false);
   assert.ok(html.includes('cx-header-title'));
-  assert.ok(/^\/\/ @name\s+纯净版$/m.test(source));
+  assert.ok(/^\/\/ @name\s+CX学习助手$/m.test(source));
 });
 for (const [input, kind, expected] of [
   ['Cannot determine', 'TYPE_SINGLE', []],

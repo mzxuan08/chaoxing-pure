@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         纯净版
+// @name         CX学习助手
 // @namespace    local:chaoxing-deepseek-pure
-// @version      1.0.4
+// @version      1.0.5
 // @updateURL    https://raw.githubusercontent.com/mzxuan08/chaoxing-pure/main/chaoxing-pure.user.js
 // @downloadURL  https://raw.githubusercontent.com/mzxuan08/chaoxing-pure/main/chaoxing-pure.user.js
 // @description  视频助手与 DeepSeek V4.1 Flash 答题；本地个人配置
@@ -40,7 +40,7 @@
 // ==/UserScript==
 
 /*
- * 本地纯净版 1.0.4，2026-10-08。
+ * 本地CX学习助手 1.0.5，2026-10-08。
  * 所有答题请求直接发往 DeepSeek 官方 API，使用用户个人账户。
  * 公开版不包含个人 API 凭据；首次使用请通过脚本管理器菜单配置。
  */
@@ -48,7 +48,7 @@
 (() => {
   'use strict';
 
-  const SCRIPT_VERSION = '1.0.4';
+  const SCRIPT_VERSION = '1.0.5';
 
   const CXUtils = {
     safeJSONParse(value, fallback = null) {
@@ -211,7 +211,7 @@
       const iframe = document.createElement('iframe');
       iframe.id = 'cx-helper-iframe';
       iframe.setAttribute('frameborder', '0');
-      iframe.setAttribute('title', '纯净版助手');
+      iframe.setAttribute('title', 'CX学习助手');
       iframe.setAttribute('allowtransparency', 'true');
       Object.assign(iframe.style, {
         position: 'fixed',
@@ -602,14 +602,14 @@
     _buildHTML() {
       return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${this._buildCSS()}</style></head><body>
         <!-- 最小化悬浮图标 -->
-        <div class="cx-mini" id="cx-mini" role="button" tabindex="0" aria-label="恢复纯净版面板">
+        <div class="cx-mini" id="cx-mini" role="button" tabindex="0" aria-label="恢复CX学习助手面板">
           <div class="cx-mini-icon"><svg class="cx-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h6a3 3 0 0 1 3 3v14a4 4 0 0 0-4-2H3zM21 4h-6a3 3 0 0 0-3 3v14a4 4 0 0 1 4-2h5z"/></svg></div>
         </div>
         <!-- 主面板 -->
         <div class="cx-panel cx-log-collapsed" id="cx-panel">
           <!-- 标题栏 -->
           <div class="cx-header" id="cx-header">
-            <span class="cx-header-title"><svg class="cx-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h6a3 3 0 0 1 3 3v14a4 4 0 0 0-4-2H3zM21 4h-6a3 3 0 0 0-3 3v14a4 4 0 0 1 4-2h5z"/></svg><span>纯净版</span></span><span class="cx-run-badge" id="cx-run-badge">待机</span>
+            <span class="cx-header-title"><svg class="cx-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h6a3 3 0 0 1 3 3v14a4 4 0 0 0-4-2H3zM21 4h-6a3 3 0 0 0-3 3v14a4 4 0 0 1 4-2h5z"/></svg><span>CX学习助手</span></span><span class="cx-run-badge" id="cx-run-badge">待机</span>
             <div class="cx-header-tools">
               <button type="button" class="cx-tool-btn" id="cx-btn-settings" title="设置" aria-label="设置"><svg class="cx-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg></button>
               <button type="button" class="cx-tool-btn" id="cx-btn-minimize" title="最小化" aria-label="最小化"><svg class="cx-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/></svg></button>
@@ -2123,7 +2123,7 @@
       ].join(',');
 
       for (const doc of docs) {
-        if (!doc || doc === UIPanel._doc) continue;
+        if (!doc || doc === UIPanel._doc || !this._isQuizDocVisible(doc)) continue;
         let candidates = [];
         try { candidates = Array.from(doc.querySelectorAll(selectors)); } catch (_) {}
         for (const el of candidates) {
@@ -5462,11 +5462,29 @@
       return null;
     },
 
-    async _confirmSubmitDialogs(doc, canAct = () => true) {
+    _findTaskSubmitButton(doc) {
+      // Explicit final-submit labels outside question rows and confirmation dialogs.
+      const explicit = this._findChapterSubmitButton(doc);
+      if (explicit) return explicit;
+      return Array.from(doc.querySelectorAll('button[type="submit"],input[type="submit"],.completeBtn,.submitBtn,.btnSubmit')).find(button =>
+        this._isQuestionSubmitControl(button) && this._quizControlText(button) === '完成' &&
+        !button.closest('.questionLi,.singleQuesId,.multipleQuesId,.judgementQuesId,.completionQuesId,[role="dialog"],.layui-layer,.modal')) || null;
+    },
+    _submissionDialogSnapshot(doc) {
+      return new Map(this._submissionDialogRoots(doc).map(root => [root, root.textContent || '']));
+    },
+    _isSubmissionConfirmation(root) {
+      if (!this._isVisibleElement(root)) return false;
+      const copy = root.cloneNode(true);
+      for (const control of copy.querySelectorAll('button,a,[role="button"],input,script,style')) control.remove();
+      const text = String(copy.textContent || '').replace(/\s+/g, '');
+      return /确认(?:提交|交卷|保存)|确定(?:提交|交卷|保存)|是否(?:提交|交卷|保存)|(?:提交|交卷|保存).{0,35}[吗？?]|未(?:做完|作答|完成).{0,40}题|(?:提交|交卷|保存)(?:成功|完成)|答案已保存/.test(text);
+    },
+    async _confirmSubmitDialogs(doc, canAct = () => true, options = {}) {
       if (!canAct()) return false;
       doc = doc || document;
       await new Promise(r => setTimeout(r, 500));
-      const docs = CXUtils.listAccessibleDocs(document, 4);
+      const docs = CXUtils.listAccessibleDocs(doc, 4);
       if (!docs.includes(doc)) docs.unshift(doc);
       const patterns = ['确定', '确认', '继续提交', '提交', '保存', '我知道了', '知道了'];
       // 只在弹窗根节点内找确认按钮，不能把页面主内容中的“提交作业”
@@ -5491,12 +5509,13 @@
           }
         }
       }
-      for (const root of this._submissionDialogRoots(doc)) { if (!seenRoots.has(root)) { seenRoots.add(root); roots.push({ doc: root.ownerDocument, root }); } }
+      for (const root of this._submissionDialogRoots(doc)) { if ((docs.includes(root.ownerDocument) || (options.parentBaseline && options.parentBaseline.get(root) !== (root.textContent || ''))) && !seenRoots.has(root)) { seenRoots.add(root); roots.push({ doc: root.ownerDocument, root }); } }
       for (const item of roots) {
-        const btn = this._findClickableByText(item.doc, patterns, item.root);
+        if (!this._isSubmissionConfirmation(item.root)) continue;
+        const btn = this._findExactQuizButton(item.doc, patterns.concat(['确认提交', '确定提交', '确认交卷']), item.root);
         if (btn) {
           try {
-            if (!canAct()) return false;
+            if (!canAct() || !this._isVisibleElement(btn) || !item.root.contains(btn)) return false;
             btn.click();
             Logger.log('已确认提交弹窗', 'info');
             await new Promise(r => setTimeout(r, 600));
@@ -5573,11 +5592,16 @@
       }
       if (submitBtn && !this._isQuestionSubmitControl(submitBtn)) submitBtn = null;
       if (submitBtn) {
+        const labelBefore = this._quizControlText(submitBtn);
+        const questionBefore = AnswerModule._questionFingerprint(container);
+        const parentBaseline = this._submissionDialogSnapshot(doc);
         await new Promise(r => setTimeout(r, 300));
-        if (!canAct()) return false;
+        if (!canAct() || submitBtn.isConnected === false || !container.contains(submitBtn) ||
+            !this._isQuestionSubmitControl(submitBtn) || this._quizControlText(submitBtn) !== labelBefore ||
+            questionBefore !== AnswerModule._questionFingerprint(container)) return false;
         try { submitBtn.click(); } catch (_) { return false; }
         Logger.log('已点击提交/保存按钮', 'info');
-        if (!options.scope) await this._confirmSubmitDialogs(doc, canAct);
+        if (!options.scope) await this._confirmSubmitDialogs(doc, canAct, { parentBaseline });
         return true;
       }
       return false;
@@ -5667,7 +5691,7 @@
       // Result-page evidence is restricted to this quiz document, never another task.
       const completedGrade = this._completedChapterGrade(doc);
       if (completedGrade) signals.set(completedGrade.node, completedGrade.text);
-      for (const d of this._submissionDocs(doc)) {
+      for (const d of [doc]) {
         let nodes = [];
         try { nodes = d.querySelectorAll('[role="status"],[data-submit-status],.submit-success,.work-submit-success,.success,.result,.work-status,.mark_info,.tip,.tips,.message,.msg,.layui-layer-content,.ui-dialog-content,body>p,body>h1,body>h2'); } catch (_) {}
         for (const node of nodes) {
@@ -5685,23 +5709,22 @@
     async _clickFinalSubmit(doc, label = '任务', canAct = () => true, options = {}) {
       if (!canAct()) return false;
       doc = doc || document;
-      const btn = options.scope ? this._findExactQuizButton(doc, this._popupSubmitLabels, options.scope) : options.chapter ? this._findChapterSubmitButton(doc) : this._findClickableByText(doc, [
-        '提交作业', '提交测验', '提交考试', '提交试卷', '提交答案', '提交',
-        '保存并提交', '保存提交', '完成', '交卷'
-      ]) || this._findClickableByText(document, [
-        '提交作业', '提交测验', '提交考试', '提交试卷', '提交答案', '提交',
-        '保存并提交', '保存提交', '完成', '交卷'
-      ]);
+      const findButton = () => options.scope ? this._findExactQuizButton(doc, this._popupSubmitLabels, options.scope) :
+        options.chapter ? this._findChapterSubmitButton(doc) : this._findTaskSubmitButton(doc);
+      const btn = findButton();
+      const labelBefore = this._quizControlText(btn);
+      const parentBaseline = this._submissionDialogSnapshot(doc);
       if (!btn) {
         Logger.log(`${label}未找到最终提交按钮`, 'info');
         return false;
       }
       if (options.chapter) { if (!(await AnswerModule._delay(300, options.run))) return false; }
       else await new Promise(r => setTimeout(r, 500));
-      if (!canAct() || btn.isConnected === false) return false;
+      if (!canAct() || btn.isConnected === false || !this._isVisibleElement(btn) ||
+          this._quizControlText(btn) !== labelBefore || findButton() !== btn) return false;
       try { btn.click(); } catch (_) { return false; }
       Logger.log(`${label}已点击最终提交按钮`, 'success');
-      if (!options.chapter && !options.scope) await this._confirmSubmitDialogs(doc, canAct);
+      if (!options.chapter && !options.scope) await this._confirmSubmitDialogs(doc, options.run ? () => AnswerModule._isRunActive(options.run) : canAct, { parentBaseline });
       return true;
     }
   };
@@ -6101,7 +6124,7 @@
         run.complete = containers.every(el => el.isConnected && this._isQuestionCompleted(el));
         const guard = () => this._canSubmitRun(run) && containers.every(el => el.isConnected && this._isQuestionCompleted(el));
         if (guard()) {
-          const submitted = await Solver._clickFinalSubmit(doc, '作业', guard);
+          const submitted = await Solver._clickFinalSubmit(doc, '作业', guard, { run });
           if (submitted) Logger.log('题目填写完整，已尝试提交作业', 'success');
         } else this._reportIncomplete(run, '作业');
       } catch (_) { run.failed++; this._reportIncomplete(run, '作业'); }
@@ -6130,7 +6153,7 @@
         if (this._isExamPaginated()) await this._processExamPaginated(run);
         else await this._processExamList(run);
         if (this._canSubmitRun(run)) {
-          const submitted = await Solver._clickFinalSubmit(this._findQuizDoc(), '考试/章测', () => this._canSubmitRun(run));
+          const submitted = await Solver._clickFinalSubmit(this._findQuizDoc(), '考试/章测', () => this._canSubmitRun(run), { run });
           if (submitted) Logger.log('题目填写完整，已尝试提交', 'success');
         } else this._reportIncomplete(run, '考试/章测');
       } catch (_) { run.failed++; this._reportIncomplete(run, '考试/章测'); }
@@ -6603,7 +6626,7 @@
       const videoCfg = ConfigStore.getVideoConfig();
       const answerCfg = ConfigStore.getAnswerConfig();
 
-      Logger.log('纯净版 v1.0.4 已加载', 'success');
+      Logger.log('CX学习助手 v1.0.5 已加载', 'success');
 
       // 4. 注入 UI 面板
       UIPanel.init();
@@ -6717,7 +6740,7 @@
       Logger.log(`初始化完成，耗时 ${elapsed}ms`, 'success');
 
     } catch (err) {
-      console.error('[学习通纯净助手] 初始化错误:', err);
+      console.error('[CX学习助手] 初始化错误:', err);
       Logger.log('初始化失败: ' + (err.message || String(err)), 'error');
     }
   }

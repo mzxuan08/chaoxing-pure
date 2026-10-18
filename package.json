@@ -1,8 +1,8 @@
 {
   "name": "chaoxing-pure",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "private": true,
-  "description": "纯净版学习通助手用户脚本",
+  "description": "CX学习助手用户脚本",
   "scripts": {
     "check": "node --check chaoxing-pure.user.js && node scripts/check.cjs",
     "test": "node --test tests/script.test.cjs",
