@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         CX学习助手
+// @name         知课助手
 // @namespace    local:chaoxing-deepseek-pure
-// @version      1.1.0
-// @updateURL    https://raw.githubusercontent.com/mzxuan08/chaoxing-pure/main/chaoxing-pure.user.js
-// @downloadURL  https://raw.githubusercontent.com/mzxuan08/chaoxing-pure/main/chaoxing-pure.user.js
+// @version      1.1.1
+// @updateURL    https://raw.githubusercontent.com/mzxuan08/zhike-helper/main/chaoxing-pure.user.js
+// @downloadURL  https://raw.githubusercontent.com/mzxuan08/zhike-helper/main/chaoxing-pure.user.js
 // @description  视频助手与 DeepSeek V4.1 Flash 答题；本地个人配置
 // @match        *://*.chaoxing.com/*
 // @match        *://chaoxing.com/*
@@ -40,7 +40,7 @@
 // ==/UserScript==
 
 /*
- * 本地CX学习助手 1.1.0，2026-10-08。
+ * 本地知课助手 1.1.1，2026-10-08。
  * 所有答题请求直接发往 DeepSeek 官方 API，使用用户个人账户。
  * 公开版不包含个人 API 凭据；首次使用请通过脚本管理器菜单配置。
  */
@@ -48,7 +48,7 @@
 (() => {
   'use strict';
 
-  const SCRIPT_VERSION = '1.1.0';
+  const SCRIPT_VERSION = '1.1.1';
 
   const CXUtils = {
     safeJSONParse(value, fallback = null) {
@@ -211,7 +211,7 @@
       const iframe = document.createElement('iframe');
       iframe.id = 'cx-helper-iframe';
       iframe.setAttribute('frameborder', '0');
-      iframe.setAttribute('title', 'CX学习助手');
+      iframe.setAttribute('title', '知课助手');
       iframe.setAttribute('allowtransparency', 'true');
       Object.assign(iframe.style, {
         position: 'fixed',
@@ -602,14 +602,14 @@
     _buildHTML() {
       return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${this._buildCSS()}</style></head><body>
         <!-- 最小化悬浮图标 -->
-        <div class="cx-mini" id="cx-mini" role="button" tabindex="0" aria-label="恢复CX学习助手面板">
+        <div class="cx-mini" id="cx-mini" role="button" tabindex="0" aria-label="恢复知课助手面板">
           <div class="cx-mini-icon"><svg class="cx-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h6a3 3 0 0 1 3 3v14a4 4 0 0 0-4-2H3zM21 4h-6a3 3 0 0 0-3 3v14a4 4 0 0 1 4-2h5z"/></svg></div>
         </div>
         <!-- 主面板 -->
         <div class="cx-panel cx-log-collapsed" id="cx-panel">
           <!-- 标题栏 -->
           <div class="cx-header" id="cx-header">
-            <span class="cx-header-title"><svg class="cx-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h6a3 3 0 0 1 3 3v14a4 4 0 0 0-4-2H3zM21 4h-6a3 3 0 0 0-3 3v14a4 4 0 0 1 4-2h5z"/></svg><span>CX学习助手</span></span><span class="cx-run-badge" id="cx-run-badge">待机</span>
+            <span class="cx-header-title"><svg class="cx-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h6a3 3 0 0 1 3 3v14a4 4 0 0 0-4-2H3zM21 4h-6a3 3 0 0 0-3 3v14a4 4 0 0 1 4-2h5z"/></svg><span>知课助手</span></span><span class="cx-run-badge" id="cx-run-badge">待机</span>
             <div class="cx-header-tools">
               <button type="button" class="cx-tool-btn" id="cx-btn-settings" title="设置" aria-label="设置"><svg class="cx-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg></button>
               <button type="button" class="cx-tool-btn" id="cx-btn-minimize" title="最小化" aria-label="最小化"><svg class="cx-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/></svg></button>
@@ -6865,7 +6865,7 @@
       const videoCfg = ConfigStore.getVideoConfig();
       const answerCfg = ConfigStore.getAnswerConfig();
 
-      Logger.log('CX学习助手 v1.1.0 已加载', 'success');
+      Logger.log('知课助手 v1.1.1 已加载', 'success');
 
       // 4. 注入 UI 面板
       UIPanel.init();
@@ -6979,7 +6979,7 @@
       Logger.log(`初始化完成，耗时 ${elapsed}ms`, 'success');
 
     } catch (err) {
-      console.error('[CX学习助手] 初始化错误:', err);
+      console.error('[知课助手] 初始化错误:', err);
       Logger.log('初始化失败: ' + (err.message || String(err)), 'error');
     }
   }
