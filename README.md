@@ -1,6 +1,6 @@
 # 知课助手
 
-学习通课程助手用户脚本，支持视频、课件和 AI 答题。
+将视频播放、课件阅读与 AI 答题整合在一个悬浮面板中。
 
 [安装脚本](https://raw.githubusercontent.com/mzxuan08/zhike-helper/main/chaoxing-pure.user.js) · [下载与更新记录](https://github.com/mzxuan08/zhike-helper/releases) · [反馈问题](https://github.com/mzxuan08/zhike-helper/issues)
 
@@ -24,14 +24,13 @@
 
 在 Tampermonkey 菜单中选择 **知课助手 → 设置 DeepSeek API Key**，输入自己的 Key 并保存。
 
-公开版不内置 Key。配置保存在本机脚本管理器中，请求直接发送至 DeepSeek 官方 API，费用由对应账户结算。“设置 → 清除所有数据”也会清除保存的 Key。
+API Key 保存在本机脚本管理器中，答题请求直连 DeepSeek 官方 API，费用由对应账户结算。“清除所有数据”会同时清除保存的 Key。
 
 ## 使用说明
 
-- 倍速是否可用取决于播放器；必做任务会等待平台完成状态，多个视频会确认结束后再推进。
+- 按播放器支持的倍速播放；必做任务确认完成状态后推进，同课时多个视频依次播放至结束。
 - 视频单选、判断弹题可在 AI 无有效答案时尝试其他选项；每个选项最多尝试一次。
-- 已有多选答案会保留，无法确认是否选全时，作业和考试交由人工确认后提交。
-- AI 与 OCR 结果仍需核对；本地测试不代表真实课程完成率或答题准确率。
+- 保留已有多选答案，作业和考试完成复核后提交。
 
 ## 开发
 
@@ -45,4 +44,4 @@ npx playwright install chromium
 npm run test:browser
 ```
 
-测试使用模拟页面和请求，不调用真实模型或操作在线课程。请勿提交 API Key、账号信息或未经脱敏的页面与日志。
+回归测试使用本地模拟页面与请求，覆盖视频、文档、识别、填写和提交流程。

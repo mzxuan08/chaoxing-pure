@@ -4,7 +4,7 @@
 // @version      1.1.2
 // @updateURL    https://raw.githubusercontent.com/mzxuan08/zhike-helper/main/chaoxing-pure.user.js
 // @downloadURL  https://raw.githubusercontent.com/mzxuan08/zhike-helper/main/chaoxing-pure.user.js
-// @description  视频助手与 DeepSeek V4.1 Flash 答题；本地个人配置
+// @description  知课助手：学习通视频、课件与 AI 答题
 // @match        *://*.chaoxing.com/*
 // @match        *://chaoxing.com/*
 // @match        *://*.xuexitong.com/*
@@ -139,7 +139,7 @@
     getAnswerConfig() {
       const current = this.get('cx_pure_answer_config');
       const legacy = this.get('cx_answer_config') || {};
-      // 迁移时只沿用 DeepSeek 的旧密钥，避免误用其他厂商凭据。
+      // 从旧版设置迁移 DeepSeek 密钥。
       const migratedKey = /^(deepseek|deepseek_v4)$/.test(legacy.aiProvider || '') ? legacy.aiApiKey : '';
       const apiKey = current ? String(current.aiApiKey || '') : String(migratedKey || PRIVATE_DEFAULT_API_KEY);
       return { mode: 'ai', aiProvider: 'deepseek', aiApiKey: apiKey };
@@ -457,7 +457,7 @@
       if (badge) { badge.textContent = isRunning ? '运行中' : '待机'; badge.classList.toggle('is-running', !!isRunning); }
       const indicator = this._doc.getElementById('cx-status-indicator');
       const timerEl = this._doc.getElementById('cx-status-timer');
-      // 先清理旧的定时器，防止内存泄漏
+      // 替换运行计时器。
       if (this._timerInterval) {
         clearInterval(this._timerInterval);
         this._timerInterval = null;
@@ -1337,7 +1337,7 @@
       }
       if (data.type !== 'EVENT') return;
       if (worker.id !== this._activeWorkerId || !worker.playToken || data.playToken !== worker.playToken) return;
-      // 同一坏源事件可能由尚未取消的旧重试链重复上报；首次 RELOAD 已足够。
+      // 同一视频源的重复事件共享一次重载。
       if (data.event === 'SOURCE_EXHAUSTED' && worker.state === 'reloading') return;
       worker.lastSeen = Date.now();
       this._applyWorkerSnapshot(worker, data.snapshot);
@@ -1446,7 +1446,7 @@
 
     playNextWorker() {
       let worker = this._workers.get(this._activeWorkerId);
-      // token 存在即表示该 PLAY 尚未终结，pending/ready 状态也不能重复下发。
+      // 播放令牌对应一次活动 PLAY，pending/ready 阶段沿用该令牌。
       if (this._isWorkerUsable(worker) && worker.playToken && worker.chapterEpoch === this._chapterEpoch) return true;
 
       const now = Date.now();
@@ -1638,7 +1638,7 @@
       const command = data.payload?.command;
       const commandEpoch = Number(data.payload?.chapterEpoch || 0);
       if (command === 'RESET') {
-        // RESET 是唯一允许推进 epoch 的命令；延迟到达的旧 RESET 不能回退 worker。
+        // RESET 推进工作帧 epoch，旧 epoch 的命令按序忽略。
         if (!commandEpoch || commandEpoch < this._workerChapterEpoch) return;
         this._workerChapterEpoch = commandEpoch;
         this._workerPlayToken = '';
@@ -2065,7 +2065,7 @@
       }
 
       // 学习目标、PPT、PDF、课件等页面本来就没有 video，直接走内容推进。
-      // 只有存在明确的非视频内容证据时才提前推进，避免误跳仍在加载的视频。
+      // 识别到非视频内容后进入对应任务流程。
       if (await this._handleNonVideoContent(false)) return;
       if (!this._isPlaybackActive(epoch)) return;
 
@@ -2081,7 +2081,7 @@
         if (!this._isPlaybackActive(epoch)) return;
         await this._tryPlayVideoInner(epoch);
       } else {
-        // 重试耗尽后再检查一次明确的非视频内容；未知空白页不能盲目跳过。
+        // 视频加载重试结束后，重新识别当前任务类型。
         if (await this._handleNonVideoContent(true)) return;
         if (!this._isPlaybackActive(epoch)) return;
         this._recoverCourse('视频加载重试耗尽，跳过当前内容');
@@ -2532,7 +2532,7 @@
       ].join(',');
       for (const context of contexts) {
         const scope = context.root?.querySelectorAll ? context.root : context.doc;
-        // PDF.js 使用两个独立控件表示页码，不能依赖合并后的 "1/10" 文本。
+        // PDF.js 的当前页与总页数分别读取。
         try {
           const currentEl = scope.querySelector?.('#pageNumber');
           const totalEl = scope.querySelector?.('#numPages');
@@ -3181,7 +3181,7 @@
     // 内部：自动答章节测验
     async _autoAnswerChapterQuiz(quizDoc) {
       const epoch = this._playbackEpoch;
-      // 防止重复调用
+      // 同一时间处理一个章节测验。
       if (this._quizAnswering) {
         Logger.log('章节测验正在进行中，跳过重复调用', 'info');
         return;
@@ -3257,7 +3257,7 @@
 
     // 内部：绑定视频事件
     _bindVideoEvents(video) {
-      // 防止重复绑定 ended 监听器（_tryPlayVideoInner 可能在同一 video 上多次调用）
+      // 每个 video 绑定一次 ended 监听器。
       if (video.dataset.cxEndedBound === '1') return;
       video.dataset.cxEndedBound = '1';
 
@@ -3265,7 +3265,7 @@
       const onEnded = () => {
         if (!this._playing) return;
         Logger.log('当前视频播放完毕', 'success');
-        // 标记此视频已完成，避免下次查找时重复返回
+        // 将完成状态关联到当前视频源。
         video.dataset.cxFinished = '1';
         const finishedSource = this._getVideoSourceKey(video);
         if (finishedSource) video.dataset.cxFinishedSrc = finishedSource;
@@ -3659,7 +3659,7 @@
           if (!this._playing || this._quizAnswering || this._advanceInFlight || video.ended) return;
           if (this._userPaused) return;
           this._lastPauseTime = Date.now();
-          // 短暂延迟后恢复，避免与正常seek冲突
+          // 正常 seek 结束后恢复播放。
           this._setPlaybackTimeout(() => {
             if (this._playing && !this._quizAnswering && !this._advanceInFlight && video.paused && !video.ended && !this._userPaused && this._isVideoSourceReady(video)) {
               this._tryPlayVideo();
@@ -3807,7 +3807,7 @@
         this._pendingPlayTimeout = null;
       }
 
-      // SPA 切换时旧视频 DOM 可能仍存在，保留来源关联的完成标记可防止重复播放。
+      // SPA 切换沿用与视频源关联的完成标记。
 
       if (!skipPageNext) {
         const pageNext = this._findPageNextButton();
@@ -3831,7 +3831,7 @@
           }
 
           // 学习通 SPA 可能复用 URL 和 iframe，只替换正文。连续短轮询标题、任务标识、
-          // 内容根及节点身份，避免一次快照漏报后又点章节树而连续跳过两节。
+          // 内容根及节点身份，用于确认本次章节切换。
           const verifyPageChange = remainingChecks => {
             this._pendingPlayTimeout = null;
             if (!this._playing) {
@@ -4212,7 +4212,7 @@
       const canAnswer = cfg.autoAnswerQuiz !== false;
       if (!canSkip && !canAnswer) return false;
 
-      // 冷却时间：避免频繁关闭
+      // 弹题操作冷却时间。
       if (Date.now() - this._lastQuizCloseTime < 3000) return false;
 
       if (canAnswer && await this._answerVideoPopupQuizIfNeeded()) return true;
@@ -4690,7 +4690,7 @@
         }
         cur = cur.parentElement;
       }
-      // 3) 整文档前置兜底：取 DOM 顺序上所有前置 .mark_name 的最后一个
+      // 3) 按 DOM 顺序读取最近的前置 .mark_name。
       try {
         const doc = el.ownerDocument || document;
         const all = doc.querySelectorAll('.mark_name');
@@ -4753,7 +4753,7 @@
       if (checkboxes.length > 0 && radios.length === 0) return this.TYPE_MULTI;
 
       // [P2 ⭐ 最高优先] 查找 .mark_name（题目标题）+ .type_tit（section 标题）
-      //   xuexitong 实测: 所有题型的容器 class 都带 singleQuesId，不可靠！
+      //   xuexitong 各题型共用 singleQuesId，题型以标题内容为准。
       //   但 h3.mark_name 的 text/aria-label 有「(多选题, 2.0 分)」
       //   h2.type_tit 有「二、 多选题 （共 15题，30.0 分）」
       //   这两个才是可靠来源 → 提到最前
@@ -4820,7 +4820,7 @@
       const headerType = checkSectionHeader(el.previousElementSibling) || (el.parentElement && checkSectionHeader(el.parentElement.previousElementSibling));
       if (headerType !== null) return headerType;
 
-      // [P5] 整体 textContent 计数比较（取前 300 字避免干扰；多选优先）
+      // [P5] 在前 300 字中识别题型标记，多选优先。
       const fullText = (el.textContent || '').slice(0, 300);
       const multiN = (fullText.match(/多选|多项选择|不定项/g) || []).length;
       const singleN = (fullText.match(/单选|单项选择/g) || []).length;
@@ -4922,9 +4922,9 @@
                  .trim();
     },
 
-    // 提取选项对（text + element + input）—— text 与 element 严格对齐，避免 input 索引错位
+    // 提取按页面顺序排列的选项文本、元素与输入控件。
     // 学习通常见问题：DOM 中可能存在隐藏 radio / 多余 radio，导致 inputs[1] 不一定对应视觉上的 B
-    // 通过此方法返回的 pairs 保证 pairs[idx].text === pageOptions[idx]，并提供对应的 element/input 用于点击
+    // pairs[idx] 与 pageOptions[idx] 采用相同索引，点击使用对应元素。
     _getOptionElement(input) {
       return input.closest('label, li, .answerBg, .option, .clearfix, .option_li, .answer_p, .textDIV, .eidtDiv, .topic-option-list li, .Zy_ulTop li') || input.parentElement || input;
     },
@@ -5432,7 +5432,7 @@
     //   2) 支持双重编码（&amp;quot; → &quot; → "）：循环解码直到稳定
     _formatString(src) {
       src = String(src || '');
-      // 只有当文本明显不含 HTML 标签时才做实体解码（避免破坏 img/iframe 标签）
+      // 对纯文本进行实体解码，HTML 内容沿用原有标签。
       if (!/<(img|iframe)\b/i.test(src)) {
         // 循环解码，每次若还剩 HTML 实体则再解一次（最多 3 次防死循环）
         for (let i = 0; i < 3; i++) {
@@ -5446,7 +5446,7 @@
           } catch (_) { break; }
         }
       }
-      // 显式兜底替换常见实体（有些环境 innerHTML 赋值被 CSP 拦截）
+      // 直接替换常见 HTML 实体。
       src = src.replace(/&quot;/g, '"')
                .replace(/&apos;/g, "'")
                .replace(/&#34;/g, '"')
@@ -5655,12 +5655,12 @@
 
     _selectOptions(indices, container, type) {
       // 通过 _extractOptionPairs 获取严格对齐的 (text, element, input) 三元组，
-      // 避免 inputs[1] 因隐藏/多余 radio 而错位（典型表现：日志显示选 B 但页面选中 A）
+      // 选项索引按可见选项排列。
       const pairs = this._extractOptionPairs(container);
       const labels = [];
       const skipped = [];
 
-      // 单次点击切换选项的勾选状态（设置为 desired），已是 desired 则跳过避免反选
+      // 按 desired 更新选中状态；状态一致时沿用当前选项。
       const setPairChecked = (pair, desired) => {
         if (!pair) return false;
         const current = this._isPairSelected(pair);
@@ -5679,7 +5679,7 @@
         return true;
       };
 
-      // 多选题：先取消现已勾选但本题答案不需要的选项（防止脏选项保留）
+      // 多选题先同步目标集合外的选项，再选中目标项。
       if (type === Solver.TYPE_MULTI && pairs.length > 0) {
         const indexSet = new Set(indices);
         for (let i = 0; i < pairs.length; i++) {
@@ -5690,7 +5690,7 @@
         }
       }
 
-      // 选中目标选项；已选中则跳过点击避免取消
+      // 选中目标选项，已选项保持原状态。
       indices.forEach(idx => {
         if (idx >= 0 && idx < pairs.length) {
           const wasSelected = this._isPairSelected(pairs[idx]);
@@ -5703,7 +5703,7 @@
           labels.push(String.fromCharCode(65 + idx));
           return;
         }
-        // 兜底：_extractOptionPairs 失败时回退到 input 索引点击（同样避免对已选项的 toggle）
+        // 未提取到选项对时，按输入控件索引处理。
         const inputs = container.querySelectorAll('input[type="radio"], input[type="checkbox"]');
         if (idx < inputs.length) {
           const input = inputs[idx];
