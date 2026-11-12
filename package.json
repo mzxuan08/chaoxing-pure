@@ -1,12 +1,12 @@
 {
   "name": "chaoxing-pure",
-  "version": "1.0.5",
+  "version": "1.1.0",
   "private": true,
   "description": "CX学习助手用户脚本",
   "scripts": {
     "check": "node --check chaoxing-pure.user.js && node scripts/check.cjs",
     "test": "node --test tests/script.test.cjs",
-    "test:browser": "node --test --test-concurrency=1 tests/*questions.browser.cjs"
+    "test:browser": "node --test --test-concurrency=1 tests/*.browser.cjs"
   },
   "devDependencies": {
     "playwright": "1.62.1"
