@@ -1,6 +1,6 @@
 # 知课助手
 
-将视频播放、课件阅读与 AI 答题整合在一个悬浮面板中。
+学习通学习助手，将视频播放、课件阅读与 AI 答题整合在一个悬浮面板中。
 
 [安装脚本](https://raw.githubusercontent.com/mzxuan08/zhike-helper/main/chaoxing-pure.user.js) · [下载与更新记录](https://github.com/mzxuan08/zhike-helper/releases) · [反馈问题](https://github.com/mzxuan08/zhike-helper/issues)
 
