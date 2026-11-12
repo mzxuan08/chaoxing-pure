@@ -1,6 +1,6 @@
 {
   "name": "zhike-helper",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "private": true,
   "description": "知课助手：学习通视频、课件与 AI 答题用户脚本",
   "scripts": {
